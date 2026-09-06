@@ -766,8 +766,7 @@
     const q = question(qid);
     if (!q) { main.innerHTML = "<p>Missing question</p>"; return; }
 
-    topMeta.textContent = "Q " + (state.idx + 1) + " / " + qids.length +
-      ;
+    topMeta.textContent = "Q " + (state.idx + 1) + " / " + qids.length;
 
     const pct = ((state.idx + 1) / qids.length) * 100;
     const isSpr = (q.type || "").toLowerCase() === "spr" || !q.choices;
