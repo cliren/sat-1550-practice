@@ -3,9 +3,9 @@
 <head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1"/>
-<meta http-equiv="Cache-Control" content="no-cache"/>
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate"/>
 <title>SAT1550 Practice</title>
-<link rel="stylesheet" href="styles.css?v=2"/>
+<link rel="stylesheet" href="styles.v3.css"/>
 </head>
 <body>
 <div id="app">
@@ -13,12 +13,13 @@
     <div class="brand" id="brandBtn">SAT1550 Practice</div>
     <div class="top-right">
       <button type="button" class="btn secondary top-exit" id="exitBtn" hidden>Exit</button>
-      <div class="top-meta" id="topMeta"></div>
+      <div class="top-meta" id="topMeta">Loading…</div>
     </div>
   </header>
-  <main id="main"></main>
+  <main id="main"><p class="sub">Loading practice…</p></main>
 </div>
-<script src="bank-data.js?v=2"></script>
-<script src="app.js?v=2"></script>
+<script src="bank-data.v3.js"></script>
+<script src="app.v3.js"></script>
+<noscript><p>Enable JavaScript to run SAT practice.</p></noscript>
 </body>
 </html>
