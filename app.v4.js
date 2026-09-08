@@ -21,7 +21,9 @@
 
   function leaveTestToSafe() {
     if (!confirmLeaveTest()) return;
+    // Keep activeAttempt so refresh/home Resume can continue; only Exit+confirm leaves the UI
     clearTimer();
+    saveActiveAttempt();
     if (state.dayId) route("day", { dayId: state.dayId });
     else route("home");
   }
@@ -78,7 +80,10 @@
     const attempts = (store.attempts || []).length;
     const testsDone = Object.keys(store.lastByTest || {}).length;
     const badges = (store.badges || []).length;
-    return { attempts, testsDone, badges, xp: store.xp || 0, streak: store.streak || 0 };
+    const active = store.activeAttempt && store.activeAttempt.testId
+      ? store.activeAttempt.testId
+      : null;
+    return { attempts, testsDone, badges, xp: store.xp || 0, streak: store.streak || 0, active };
   }
 
   function ensureProgress(store) {
@@ -91,7 +96,78 @@
     if (!store.dayCompleteAwarded) store.dayCompleteAwarded = {};
     store.attempts = store.attempts || [];
     store.lastByTest = store.lastByTest || {};
+    if (store.activeAttempt === undefined) store.activeAttempt = null;
     return store;
+  }
+
+  function saveActiveAttempt() {
+    if (state.view !== "test" || !state.testId) return;
+    const store = ensureProgress(loadStore());
+    store.activeAttempt = {
+      testId: state.testId,
+      dayId: state.dayId || null,
+      idx: state.idx || 0,
+      answers: { ...(state.answers || {}) },
+      marked: { ...(state.marked || {}) },
+      startedAt: state.startedAt || Date.now(),
+      endsAt: state.endsAt || 0,
+      savedAt: Date.now()
+    };
+    saveStore(store);
+  }
+
+  function clearActiveAttempt() {
+    const store = ensureProgress(loadStore());
+    store.activeAttempt = null;
+    saveStore(store);
+  }
+
+  function getActiveAttempt() {
+    const store = ensureProgress(loadStore());
+    const a = store.activeAttempt;
+    if (!a || !a.testId) return null;
+    if (!testObj(a.testId)) return null;
+    return a;
+  }
+
+  function beginTimer() {
+    clearTimer();
+    state.timerId = setInterval(() => {
+      if (Date.now() >= state.endsAt) submitTest();
+      else {
+        const el = document.getElementById("timer");
+        if (el) el.textContent = fmt(state.endsAt - Date.now());
+        // keep endsAt durable if tab sleeps oddly
+        if (state.view === "test") saveActiveAttempt();
+      }
+    }, 1000);
+  }
+
+  function resumeActiveAttempt(a) {
+    if (!a) return false;
+    const t = testObj(a.testId);
+    if (!t) { clearActiveAttempt(); return false; }
+    clearTimer();
+    pendingCelebration = null;
+    let endsAt = a.endsAt || 0;
+    // If timer already expired while away, keep endsAt in the past so submit path can run after restore
+    state = {
+      ...state,
+      view: "test",
+      testId: a.testId,
+      dayId: a.dayId || state.dayId,
+      idx: Math.min(Math.max(0, a.idx || 0), Math.max(0, (t.questionIds || []).length - 1)),
+      answers: { ...(a.answers || {}) },
+      marked: { ...(a.marked || {}) },
+      startedAt: a.startedAt || Date.now(),
+      endsAt: endsAt,
+      reviewMode: false,
+      result: null,
+      timerId: null
+    };
+    beginTimer();
+    saveActiveAttempt();
+    return true;
   }
 
   function levelForXp(xp) {
@@ -488,9 +564,28 @@
       .replace(/>/g, "&gt;").replace(/"/g, "&quot;");
   }
 
-  function startTest(testId) {
+  function startTest(testId, opts) {
     const t = testObj(testId);
     if (!t) return;
+    opts = opts || {};
+    const existing = getActiveAttempt();
+    if (!opts.forceNew && existing && existing.testId === testId) {
+      resumeActiveAttempt(existing);
+      render();
+      return;
+    }
+    if (!opts.forceNew && existing && existing.testId !== testId) {
+      const title = (testObj(existing.testId) || {}).title || existing.testId;
+      const keep = confirm(
+        "You have an unfinished test: " + title + "\n\nOK = resume that test\nCancel = discard it and start this one"
+      );
+      if (keep) {
+        resumeActiveAttempt(existing);
+        render();
+        return;
+      }
+      clearActiveAttempt();
+    }
     const mins = Math.max(1, t.minutes || 15);
     const now = Date.now();
     clearTimer();
@@ -502,15 +597,8 @@
       startedAt: now, endsAt: now + mins * 60 * 1000,
       reviewMode: false, result: null, timerId: null
     };
-    if (mins) {
-      state.timerId = setInterval(() => {
-        if (Date.now() >= state.endsAt) submitTest();
-        else {
-          const el = document.getElementById("timer");
-          if (el) el.textContent = fmt(state.endsAt - Date.now());
-        }
-      }, 250);
-    }
+    beginTimer();
+    saveActiveAttempt();
     render();
   }
 
@@ -547,6 +635,7 @@
     });
     store.lastByTest = store.lastByTest || {};
     store.lastByTest[state.testId] = result;
+    store.activeAttempt = null;
     saveStore(store);
     // Switch to results BEFORE award UI so XP/badge toasts are not blocked by test quarantine
     state.view = "results";
@@ -563,13 +652,14 @@
     main.innerHTML =
       '<button class="btn secondary" id="back">← Home</button>' +
       "<h1>Settings</h1>" +
-      '<p class="sub">Test scores, XP, streaks, and badges stay in <strong>this browser’s local storage</strong> on this device. Clearing history or using another phone/browser starts fresh.</p>' +
+      '<p class="sub">Test scores, in-progress answers/timer, XP, streaks, and badges stay in <strong>this browser’s local storage</strong> on this device. Clearing history or using another phone/browser starts fresh.</p>' +
       '<div class="panel settings-panel">' +
       "<h4>Saved on this device</h4>" +
       "<ul>" +
       "<li><strong>" + sum.testsDone + "</strong> tests with a saved score</li>" +
       "<li><strong>" + sum.attempts + "</strong> submit attempts</li>" +
       "<li><strong>" + sum.xp + "</strong> XP · streak <strong>" + sum.streak + "</strong> · badges <strong>" + sum.badges + "</strong></li>" +
+      "<li>In-progress test: <strong>" + (sum.active ? escapeHtml(sum.active) : "none") + "</strong></li>" +
       "</ul>" +
       '<p class="muted">Storage key: <code>' + escapeHtml(storeKey) + "</code></p>" +
       "</div>" +
@@ -623,6 +713,22 @@
         "</div>"
       );
     }).join("");
+    const active = getActiveAttempt();
+    let resumeHtml = "";
+    if (active) {
+      const at = testObj(active.testId);
+      const answered = Object.keys(active.answers || {}).length;
+      const totalQ = at && at.questionIds ? at.questionIds.length : "?";
+      const leftMs = Math.max(0, (active.endsAt || 0) - Date.now());
+      resumeHtml =
+        '<div class="home-resume panel">' +
+        "<h3>Resume in-progress test</h3>" +
+        "<p>" + escapeHtml(at ? at.title : active.testId) +
+        " · " + answered + "/" + totalQ + " answered · " + fmt(leftMs) + " left</p>" +
+        '<button class="btn" id="btnResumeActive">Resume test</button> ' +
+        '<button class="btn secondary" id="btnDiscardActive">Discard</button>' +
+        "</div>";
+    }
     let continueHtml = "";
     if (cont) {
       const doneN = (cont.tests || []).filter((tid) => store.lastByTest && store.lastByTest[tid]).length;
@@ -637,7 +743,8 @@
     main.innerHTML =
       hudHtml() +
       "<h1>6-day path toward 1550+</h1>" +
-      '<p class="sub">Baseline 600/600 · Exam Sep 12. Timed modules first — Bluebook fulls stay official. Progress saves automatically in this browser.</p>' +
+      '<p class="sub">Baseline 600/600 · Exam Sep 12. Timed modules first — Bluebook fulls stay official. Progress and in-progress tests save in this browser.</p>' +
+      resumeHtml +
       continueHtml +
       sep12SectionHtml() +
       badgesStripHtml() +
@@ -650,6 +757,14 @@
     });
     const btnC = document.getElementById("btnContinue");
     if (btnC && cont) btnC.onclick = () => route("day", { dayId: cont.id });
+    const btnR = document.getElementById("btnResumeActive");
+    if (btnR) btnR.onclick = () => { const a = getActiveAttempt(); if (a) { resumeActiveAttempt(a); render(); } };
+    const btnD = document.getElementById("btnDiscardActive");
+    if (btnD) btnD.onclick = () => {
+      if (!confirm("Discard the in-progress test? Answers for this attempt will be lost.")) return;
+      clearActiveAttempt();
+      render();
+    };
     document.getElementById("btnStrategy").onclick = (e) => { e.preventDefault(); route("strategy"); };
     document.getElementById("btnAllTests").onclick = (e) => { e.preventDefault(); route("library"); };
     const btnSet = document.getElementById("btnSettings");
@@ -1026,7 +1141,7 @@
     document.getElementById("filtMiss").onclick = () => { state.reviewFilter = "missed"; state.idx = 0; render(); };
     document.getElementById("btnPrev").onclick = () => { state.idx--; render(); };
     document.getElementById("btnNext").onclick = () => { state.idx++; render(); };
-    document.getElementById("btnRetake").onclick = () => startTest(result.testId);
+    document.getElementById("btnRetake").onclick = () => startTest(result.testId, { forceNew: true });
   }
 
   function updateChrome() {
@@ -1062,6 +1177,7 @@
   }
 
   function render() {
+    if (state.view === "test") saveActiveAttempt();
     updateChrome();
     const v = state.view;
     if (v === "home") renderHome();
@@ -1115,7 +1231,18 @@
 
   ensureProgress(loadStore());
   saveStore(ensureProgress(loadStore()));
-  render();
+  const bootActive = getActiveAttempt();
+  if (bootActive) {
+    resumeActiveAttempt(bootActive);
+    if (Date.now() >= state.endsAt) {
+      // Timer ran out while away — auto-submit saved answers
+      submitTest();
+    } else {
+      render();
+    }
+  } else {
+    render();
+  }
 })().catch((err) => {
   const m = document.getElementById("main");
   if (m) m.innerHTML = "<h1>App error</h1><pre style=\"white-space:pre-wrap\">" + String(err && err.stack ? err.stack : err) + "</pre>";

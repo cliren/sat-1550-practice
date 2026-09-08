@@ -536,3 +536,11 @@ body.review-mode .brand { font-size: 14px; opacity: 0.85; }
   font-size: 12px;
   color: var(--muted);
 }
+
+
+.home-resume {
+  margin: 12px 0 16px;
+  border-color: rgba(230, 179, 90, 0.55);
+}
+.home-resume h3 { margin: 0 0 6px; color: var(--gold); }
+.home-resume .btn { margin-top: 8px; margin-right: 8px; }
