@@ -518,3 +518,21 @@ body.review-mode .brand { font-size: 14px; opacity: 0.85; }
   .timer { font-size: 1.25rem; font-variant-numeric: tabular-nums; }
   .progress-blue, .blue-bar, .bar { height: 8px; }
 }
+
+
+/* settings */
+.settings-panel ul { margin: 8px 0 12px; padding-left: 1.2rem; }
+.settings-danger {
+  border-color: rgba(224, 112, 112, 0.45);
+  margin-top: 16px;
+}
+.btn.danger {
+  background: #a33b3b;
+  border-color: #c45c5c;
+  color: #fff;
+}
+.btn.danger:hover { filter: brightness(1.08); }
+.settings-panel code {
+  font-size: 12px;
+  color: var(--muted);
+}

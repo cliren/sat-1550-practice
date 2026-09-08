@@ -70,6 +70,16 @@
     catch { return {}; }
   };
   const saveStore = (s) => localStorage.setItem(storeKey, JSON.stringify(s));
+  function clearLocalProgress() {
+    localStorage.removeItem(storeKey);
+  }
+  function progressSummary(store) {
+    store = ensureProgress(store || {});
+    const attempts = (store.attempts || []).length;
+    const testsDone = Object.keys(store.lastByTest || {}).length;
+    const badges = (store.badges || []).length;
+    return { attempts, testsDone, badges, xp: store.xp || 0, streak: store.streak || 0 };
+  }
 
   function ensureProgress(store) {
     if (typeof store.xp !== "number") store.xp = 0;
@@ -545,6 +555,54 @@
     render();
   }
 
+
+  function renderSettings() {
+    const store = ensureProgress(loadStore());
+    const sum = progressSummary(store);
+    topMeta.textContent = "Settings";
+    main.innerHTML =
+      '<button class="btn secondary" id="back">← Home</button>' +
+      "<h1>Settings</h1>" +
+      '<p class="sub">Test scores, XP, streaks, and badges stay in <strong>this browser’s local storage</strong> on this device. Clearing history or using another phone/browser starts fresh.</p>' +
+      '<div class="panel settings-panel">' +
+      "<h4>Saved on this device</h4>" +
+      "<ul>" +
+      "<li><strong>" + sum.testsDone + "</strong> tests with a saved score</li>" +
+      "<li><strong>" + sum.attempts + "</strong> submit attempts</li>" +
+      "<li><strong>" + sum.xp + "</strong> XP · streak <strong>" + sum.streak + "</strong> · badges <strong>" + sum.badges + "</strong></li>" +
+      "</ul>" +
+      '<p class="muted">Storage key: <code>' + escapeHtml(storeKey) + "</code></p>" +
+      "</div>" +
+      '<div class="panel settings-danger">' +
+      "<h4>Reset local data</h4>" +
+      '<p class="muted">This erases progress on <em>this browser only</em>. It cannot be undone. Other devices are unchanged.</p>' +
+      '<button type="button" class="btn danger" id="btnResetLocal">Reset all local progress…</button>' +
+      '<p class="muted" id="resetMsg" hidden></p>' +
+      "</div>";
+    document.getElementById("back").onclick = () => route("home");
+    document.getElementById("btnResetLocal").onclick = () => {
+      const ok1 = confirm(
+        "Reset ALL local SAT progress on this device?\\n\\n" +
+        "This deletes saved test scores, XP, streaks, and badges in this browser.\\n\\n" +
+        "You cannot undo this."
+      );
+      if (!ok1) return;
+      const typed = prompt('Type RESET to confirm wiping local progress:');
+      if (typed !== "RESET") {
+        const msg = document.getElementById("resetMsg");
+        if (msg) {
+          msg.hidden = false;
+          msg.textContent = "Reset cancelled — you must type RESET exactly.";
+        }
+        return;
+      }
+      clearLocalProgress();
+      pendingCelebration = null;
+      route("home");
+      alert("Local progress cleared on this device.");
+    };
+  }
+
   function renderHome() {
     const store = ensureProgress(loadStore());
     const prog = levelProgress(store.xp || 0);
@@ -579,13 +637,13 @@
     main.innerHTML =
       hudHtml() +
       "<h1>6-day path toward 1550+</h1>" +
-      '<p class="sub">Baseline 600/600 · Exam Sep 12. Timed modules first — Bluebook fulls stay official.</p>' +
+      '<p class="sub">Baseline 600/600 · Exam Sep 12. Timed modules first — Bluebook fulls stay official. Progress saves automatically in this browser.</p>' +
       continueHtml +
       sep12SectionHtml() +
       badgesStripHtml() +
       '<div class="grid">' + days + "</div>" +
       '<p class="home-secondary">' +
-      '<a id="btnAllTests">All tests</a> · <a id="btnStrategy">Speed strategy</a>' +
+      '<a id="btnAllTests">All tests</a> · <a id="btnStrategy">Speed strategy</a> · <a id="btnSettings">Settings</a>' +
       "</p>";
     main.querySelectorAll("[data-day]").forEach((el) => {
       el.onclick = () => route("day", { dayId: el.dataset.day });
@@ -594,6 +652,8 @@
     if (btnC && cont) btnC.onclick = () => route("day", { dayId: cont.id });
     document.getElementById("btnStrategy").onclick = (e) => { e.preventDefault(); route("strategy"); };
     document.getElementById("btnAllTests").onclick = (e) => { e.preventDefault(); route("library"); };
+    const btnSet = document.getElementById("btnSettings");
+    if (btnSet) btnSet.onclick = (e) => { e.preventDefault(); route("settings"); };
     const fill = main.querySelector(".xp-fill");
     if (fill) {
       const w = fill.style.width;
@@ -1008,6 +1068,7 @@
     else if (v === "day") renderDay();
     else if (v === "library") renderLibrary();
     else if (v === "strategy") renderStrategy();
+    else if (v === "settings") renderSettings();
     else if (v === "test") renderTest();
     else if (v === "results") renderResults();
     else if (v === "review") renderReview();
