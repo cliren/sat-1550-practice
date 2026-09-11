@@ -544,3 +544,56 @@ body.review-mode .brand { font-size: 14px; opacity: 0.85; }
 }
 .home-resume h3 { margin: 0 0 6px; color: var(--gold); }
 .home-resume .btn { margin-top: 8px; margin-right: 8px; }
+
+
+/* Final review cards */
+.home-final-cta { margin: 14px 0 18px; }
+.btn.final-cta {
+  width: 100%;
+  background: linear-gradient(135deg, #c9a227, #e6b35a 45%, #f0d78c);
+  color: #1a1408;
+  border: none;
+  font-weight: 700;
+  font-size: 1.05rem;
+  min-height: 48px;
+}
+.final-cta-note { margin: 8px 0 0; font-size: 13px; }
+.final-hud {
+  display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 12px;
+}
+.final-chip {
+  display: inline-flex; align-items: center;
+  padding: 6px 10px; border-radius: 999px;
+  background: var(--panel2); border: 1px solid rgba(255,255,255,0.06);
+  font-size: 13px; color: var(--text);
+}
+.final-card {
+  background: var(--panel);
+  border: 1px solid rgba(91, 159, 212, 0.28);
+  border-radius: 16px;
+  padding: 16px 16px 18px;
+  box-shadow: 0 10px 28px rgba(0,0,0,0.22);
+}
+.final-meta { font-size: 12px; margin-bottom: 8px; }
+.final-card .stem {
+  font-size: 1.05rem; line-height: 1.45; margin: 0 0 14px; white-space: pre-wrap;
+}
+.final-choices .choice:disabled { opacity: 1; }
+.teach-card {
+  margin-top: 14px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: rgba(224, 112, 112, 0.1);
+  border: 1px solid rgba(224, 112, 112, 0.45);
+}
+.teach-card.teach-ok {
+  background: rgba(107, 203, 138, 0.1);
+  border-color: rgba(107, 203, 138, 0.45);
+}
+.teach-wrong-head { font-weight: 700; color: #f0a0a0; margin-bottom: 8px; }
+.teach-ok-head { font-weight: 700; color: #8fdfad; margin-bottom: 8px; }
+.teach-you, .teach-trap, .teach-right { margin: 6px 0; line-height: 1.4; font-size: 14px; }
+.teach-block { margin-top: 10px; }
+.teach-block h4 { margin: 0 0 4px; font-size: 13px; color: #cfe0f5; }
+.teach-block p { margin: 0; color: var(--muted); font-size: 14px; line-height: 1.45; }
+.teach-block.tip p { color: var(--gold); }

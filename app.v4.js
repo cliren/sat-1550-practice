@@ -97,6 +97,12 @@
     store.attempts = store.attempts || [];
     store.lastByTest = store.lastByTest || {};
     if (store.activeAttempt === undefined) store.activeAttempt = null;
+    if (!store.finalReview) store.finalReview = { seen: {}, wrong: {}, correct: 0, answered: 0, bestStreak: 0 };
+    if (!store.finalReview.seen) store.finalReview.seen = {};
+    if (!store.finalReview.wrong) store.finalReview.wrong = {};
+    if (typeof store.finalReview.correct !== "number") store.finalReview.correct = 0;
+    if (typeof store.finalReview.answered !== "number") store.finalReview.answered = 0;
+    if (typeof store.finalReview.bestStreak !== "number") store.finalReview.bestStreak = 0;
     return store;
   }
 
@@ -528,7 +534,9 @@
     view: "home", dayId: null, testId: null, idx: 0,
     answers: {}, marked: {}, startedAt: 0, endsAt: 0,
     timerId: null, reviewMode: false, result: null, reviewFilter: "all",
-    reviewVisited: {}
+    reviewVisited: {},
+    finalDeck: [], finalIdx: 0, finalChoice: null, finalRevealed: false,
+    finalSession: null
   };
 
   function clearTimer() {
@@ -693,6 +701,261 @@
     };
   }
 
+
+  const FINAL_PACKS = [
+    "hp-rw-module1-traps",
+    "hp-rw-evidence-synthesis",
+    "hp-math-module1-bank",
+    "hp-math-desmos-systems",
+    "boundaries",
+    "linear",
+    "module1-mixed-27q"
+  ];
+
+  function shuffleInPlace(arr) {
+    for (let i = arr.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      const tmp = arr[i]; arr[i] = arr[j]; arr[j] = tmp;
+    }
+    return arr;
+  }
+
+  function buildFinalDeck() {
+    const store = ensureProgress(loadStore());
+    const seen = store.finalReview.seen || {};
+    const wrongMap = store.finalReview.wrong || {};
+    const ids = [];
+    const used = {};
+    FINAL_PACKS.forEach((tid) => {
+      const t = testObj(tid);
+      if (!t) return;
+      (t.questionIds || []).forEach((qid) => {
+        if (used[qid] || !question(qid)) return;
+        used[qid] = true;
+        ids.push(qid);
+      });
+    });
+    // Prioritize: previously missed in final review, then never seen, then rest
+    const missed = [];
+    const fresh = [];
+    const rest = [];
+    ids.forEach((qid) => {
+      if (wrongMap[qid]) missed.push(qid);
+      else if (!seen[qid]) fresh.push(qid);
+      else rest.push(qid);
+    });
+    shuffleInPlace(missed);
+    shuffleInPlace(fresh);
+    shuffleInPlace(rest);
+    return missed.concat(fresh, rest);
+  }
+
+  function startFinalReview() {
+    clearTimer();
+    const deck = buildFinalDeck();
+    if (!deck.length) {
+      alert("No final-review cards available yet.");
+      return;
+    }
+    state = {
+      ...state,
+      view: "final",
+      finalDeck: deck,
+      finalIdx: 0,
+      finalChoice: null,
+      finalRevealed: false,
+      finalSession: { correct: 0, wrong: 0, streak: 0, bestStreak: 0, xp: 0 },
+      reviewMode: false,
+      result: null
+    };
+    render();
+  }
+
+  function finalCurrentQ() {
+    const id = (state.finalDeck || [])[state.finalIdx];
+    return id ? question(id) : null;
+  }
+
+  function recordFinalAnswer(qid, ok) {
+    const store = ensureProgress(loadStore());
+    store.finalReview.seen[qid] = Date.now();
+    store.finalReview.answered = (store.finalReview.answered || 0) + 1;
+    if (ok) {
+      store.finalReview.correct = (store.finalReview.correct || 0) + 1;
+      delete store.finalReview.wrong[qid];
+      store.xp = (store.xp || 0) + 8;
+      if (state.finalSession) {
+        state.finalSession.correct++;
+        state.finalSession.streak++;
+        state.finalSession.xp += 8;
+        if (state.finalSession.streak > state.finalSession.bestStreak) {
+          state.finalSession.bestStreak = state.finalSession.streak;
+        }
+        if (state.finalSession.bestStreak > (store.finalReview.bestStreak || 0)) {
+          store.finalReview.bestStreak = state.finalSession.bestStreak;
+        }
+      }
+    } else {
+      store.finalReview.wrong[qid] = (store.finalReview.wrong[qid] || 0) + 1;
+      store.xp = (store.xp || 0) + 2; // consolation for engaging the teach card
+      if (state.finalSession) {
+        state.finalSession.wrong++;
+        state.finalSession.streak = 0;
+        state.finalSession.xp += 2;
+      }
+    }
+    saveStore(store);
+  }
+
+  function teachHtml(q, got) {
+    const ans = (q.answer || "").toString();
+    const trap = q.commonTrap || "";
+    const expl = q.explanation || "";
+    const method = q.method || "";
+    const tip = q.speedTip || "";
+    const gotLabel = got ? escapeHtml(String(got)) : "—";
+    let choiceText = "";
+    if (q.choices && got && q.choices[got]) {
+      choiceText = " (" + escapeHtml(q.choices[got]) + ")";
+    }
+    return (
+      '<div class="teach-card">' +
+      '<div class="teach-wrong-head">Not quite — here\'s the fix</div>' +
+      '<p class="teach-you"><strong>You picked</strong> ' + gotLabel + choiceText + "</p>" +
+      (trap
+        ? '<p class="teach-trap"><strong>What went wrong:</strong> ' + escapeHtml(trap) + "</p>"
+        : '<p class="teach-trap"><strong>What went wrong:</strong> that choice doesn\'t match the rule this item is testing.</p>') +
+      '<p class="teach-right"><strong>Correct:</strong> ' + escapeHtml(ans) +
+      (q.choices && q.choices[ans] ? " — " + escapeHtml(q.choices[ans]) : "") + "</p>" +
+      (expl ? '<div class="teach-block"><h4>Why</h4><p>' + escapeHtml(expl) + "</p></div>" : "") +
+      (method ? '<div class="teach-block"><h4>How to get it next time</h4><p>' + escapeHtml(method) + "</p></div>" : "") +
+      (tip ? '<div class="teach-block tip"><h4>Speed tip</h4><p>' + escapeHtml(tip) + "</p></div>" : "") +
+      "</div>"
+    );
+  }
+
+  function renderFinalReview() {
+    const deck = state.finalDeck || [];
+    const q = finalCurrentQ();
+    const sess = state.finalSession || { correct: 0, wrong: 0, streak: 0, bestStreak: 0, xp: 0 };
+    topMeta.textContent = "Final review · " + (state.finalIdx + 1) + "/" + deck.length;
+
+    if (!q) {
+      main.innerHTML =
+        '<button class="btn secondary" id="back">← Home</button>' +
+        "<h1>Final review complete</h1>" +
+        '<p class="sub">Session: ' + sess.correct + " correct · " + sess.wrong + " taught · best streak " + sess.bestStreak + " · +" + sess.xp + " XP</p>" +
+        '<button class="btn" id="btnFinalAgain">Shuffle another round</button>';
+      document.getElementById("back").onclick = () => route("home");
+      document.getElementById("btnFinalAgain").onclick = () => startFinalReview();
+      return;
+    }
+
+    const isSpr = (q.type || "").toLowerCase() === "spr" || !q.choices;
+    const revealed = !!state.finalRevealed;
+    const got = state.finalChoice;
+    const ans = (q.answer || "").toString().trim();
+    const ok = revealed && normalizeAns(got) === normalizeAns(ans);
+
+    let choicesHtml = "";
+    if (isSpr) {
+      choicesHtml =
+        '<label class="muted" for="finalSpr">Your answer</label><br/>' +
+        '<input class="spr" id="finalSpr" type="text" ' + (revealed ? "disabled " : "") +
+        'value="' + escapeHtml(got || "") + '" autocomplete="off" placeholder="Type answer"/>' +
+        (revealed ? "" : '<button class="btn" id="finalCheck" style="margin-top:10px">Check</button>');
+    } else {
+      const keys = Object.keys(q.choices || {});
+      choicesHtml = '<div class="choices final-choices">' + keys.map((k) => {
+        let cls = "choice";
+        if (revealed) {
+          if (k === ans) cls += " correct";
+          if (got && k === got && k !== ans) cls += " wrong";
+          if (got && k === got && k === ans) cls += " selected";
+        }
+        return '<button class="' + cls + '" data-choice="' + escapeHtml(k) + '"' +
+          (revealed ? " disabled" : "") + "><strong>" + escapeHtml(k) + ".</strong> " +
+          escapeHtml(q.choices[k]) + "</button>";
+      }).join("") + "</div>";
+    }
+
+    const hud =
+      '<div class="final-hud">' +
+      '<span class="final-chip">✦ +' + sess.xp + " XP</span>" +
+      '<span class="final-chip">🔥 ' + sess.streak + " streak</span>" +
+      '<span class="final-chip">✓ ' + sess.correct + "</span>" +
+      '<span class="final-chip">✗ ' + sess.wrong + "</span>" +
+      "</div>";
+
+    let feedback = "";
+    if (revealed && ok) {
+      feedback =
+        '<div class="teach-card teach-ok">' +
+        '<div class="teach-ok-head">Nice — locked in</div>' +
+        (q.method ? "<p>" + escapeHtml(q.method) + "</p>" : "") +
+        (q.speedTip ? '<p class="muted">⚡ ' + escapeHtml(q.speedTip) + "</p>" : "") +
+        "</div>";
+    } else if (revealed && !ok) {
+      feedback = teachHtml(q, got);
+    }
+
+    main.innerHTML =
+      '<button class="btn secondary" id="back">← Home</button>' +
+      "<h1>Final review</h1>" +
+      '<p class="sub">Rapid cards from high-prob Sep 12 packs. Wrong answers teach immediately.</p>' +
+      hud +
+      '<div class="final-card">' +
+      '<div class="final-meta muted">' + escapeHtml(q.section || "") +
+      (q.skill ? " · " + escapeHtml(q.skill) : "") +
+      " · Card " + (state.finalIdx + 1) + "/" + deck.length + "</div>" +
+      '<p class="stem">' + escapeHtml(q.stem || "") + "</p>" +
+      choicesHtml +
+      feedback +
+      (revealed
+        ? '<button class="btn" id="finalNext" style="margin-top:14px;width:100%">' +
+          (state.finalIdx >= deck.length - 1 ? "Finish round" : "Next card →") + "</button>"
+        : "") +
+      "</div>";
+
+    document.getElementById("back").onclick = () => route("home");
+
+    function reveal(choice) {
+      if (state.finalRevealed) return;
+      state.finalChoice = choice;
+      state.finalRevealed = true;
+      const good = normalizeAns(choice) === normalizeAns(ans);
+      recordFinalAnswer(q.id || deck[state.finalIdx], good);
+      render();
+    }
+
+    if (!revealed) {
+      if (isSpr) {
+        const btn = document.getElementById("finalCheck");
+        if (btn) btn.onclick = () => {
+          const v = (document.getElementById("finalSpr") || {}).value || "";
+          if (!String(v).trim()) return;
+          reveal(v);
+        };
+      } else {
+        main.querySelectorAll("[data-choice]").forEach((el) => {
+          el.onclick = () => reveal(el.dataset.choice);
+        });
+      }
+    } else {
+      const nxt = document.getElementById("finalNext");
+      if (nxt) nxt.onclick = () => {
+        if (state.finalIdx >= deck.length - 1) {
+          state.finalIdx = deck.length; // triggers complete view
+        } else {
+          state.finalIdx++;
+          state.finalChoice = null;
+          state.finalRevealed = false;
+        }
+        render();
+      };
+    }
+  }
+
   function renderHome() {
     const store = ensureProgress(loadStore());
     const prog = levelProgress(store.xp || 0);
@@ -746,11 +1009,15 @@
       '<p class="sub">Baseline 600/600 · Exam Sep 12. Timed modules first — Bluebook fulls stay official. Progress and in-progress tests save in this browser.</p>' +
       resumeHtml +
       continueHtml +
+      '<div class="home-final-cta">' +
+      '<button class="btn final-cta" id="btnFinalReview">Final review</button>' +
+      '<p class="muted final-cta-note">Card mode · instant coaching on misses · high-prob Sep 12 set</p>' +
+      "</div>" +
       sep12SectionHtml() +
       badgesStripHtml() +
       '<div class="grid">' + days + "</div>" +
       '<p class="home-secondary">' +
-      '<a id="btnAllTests">All tests</a> · <a id="btnStrategy">Speed strategy</a> · <a id="btnSettings">Settings</a>' +
+      '<a id="btnFinalReviewNav">Final review</a> · <a id="btnAllTests">All tests</a> · <a id="btnStrategy">Speed strategy</a> · <a id="btnSettings">Settings</a>' +
       "</p>";
     main.querySelectorAll("[data-day]").forEach((el) => {
       el.onclick = () => route("day", { dayId: el.dataset.day });
@@ -769,6 +1036,10 @@
     document.getElementById("btnAllTests").onclick = (e) => { e.preventDefault(); route("library"); };
     const btnSet = document.getElementById("btnSettings");
     if (btnSet) btnSet.onclick = (e) => { e.preventDefault(); route("settings"); };
+    const btnF = document.getElementById("btnFinalReview");
+    if (btnF) btnF.onclick = () => startFinalReview();
+    const btnFn = document.getElementById("btnFinalReviewNav");
+    if (btnFn) btnFn.onclick = (e) => { e.preventDefault(); startFinalReview(); };
     const fill = main.querySelector(".xp-fill");
     if (fill) {
       const w = fill.style.width;
@@ -1185,6 +1456,7 @@
     else if (v === "library") renderLibrary();
     else if (v === "strategy") renderStrategy();
     else if (v === "settings") renderSettings();
+    else if (v === "final") renderFinalReview();
     else if (v === "test") renderTest();
     else if (v === "results") renderResults();
     else if (v === "review") renderReview();
@@ -1192,6 +1464,26 @@
   }
 
   document.addEventListener("keydown", (e) => {
+    if (state.view === "final") {
+      if (state.finalRevealed) {
+        if (e.key === "Enter" || e.key === "ArrowRight") {
+          e.preventDefault();
+          const nxt = document.getElementById("finalNext");
+          if (nxt) nxt.click();
+        }
+        return;
+      }
+      const k = e.key.toUpperCase();
+      if (["A", "B", "C", "D"].includes(k)) {
+        const btn = main.querySelector('[data-choice="' + k + '"]');
+        if (btn) { e.preventDefault(); btn.click(); }
+      }
+      if (e.key === "Enter") {
+        const chk = document.getElementById("finalCheck");
+        if (chk) { e.preventDefault(); chk.click(); }
+      }
+      return;
+    }
     if (state.view !== "test") {
       if (state.view === "review") {
         if (e.key === "ArrowLeft") { e.preventDefault(); state.idx--; render(); }
